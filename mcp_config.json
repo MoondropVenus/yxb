@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "DrissionPageMCP": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "D:\\Screenshot Search", "run", "main.py"]
+    }
+  }
+}

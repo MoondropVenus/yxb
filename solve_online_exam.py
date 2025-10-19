@@ -1,0 +1,369 @@
+#!/usr/bin/env python3
+"""
+在线考试题目解答脚本
+专门用于解答 https://www.zlbbda.com.cn/studysome/topicbank 上的题目
+"""
+
+import asyncio
+import base64
+from pathlib import Path
+import os
+
+# 尝试导入DrissionPage，如果没有则提示安装
+try:
+    from DrissionPage import ChromiumOptions, Chromium
+except ImportError:
+    print("请先安装DrissionPage: pip install DrissionPage")
+    exit(1)
+
+# 尝试导入openai，如果没有则提示安装
+try:
+    from openai import OpenAI
+except ImportError:
+    print("请先安装openai: pip install openai")
+    exit(1)
+
+
+async def connect_to_browser():
+    """连接到浏览器"""
+    print("1. 正在连接浏览器...")
+    try:
+        # 首先尝试连接到现有的浏览器实例
+        co = ChromiumOptions()
+        co.set_local_port(9222)  # 默认端口
+        browser = Chromium(co)
+        print(f"   浏览器连接成功: 127.0.0.1:9222")
+        return browser
+    except Exception as e:
+        print(f"   连接现有浏览器失败: {e}")
+        print("   正在启动新的浏览器实例...")
+        try:
+            # 启动新的浏览器实例
+            co = ChromiumOptions()
+            co.set_local_port(9222)
+            co.headless(False)  # 非无头模式，方便调试
+            browser = Chromium(co)
+            print(f"   新浏览器启动成功: 127.0.0.1:9222")
+            return browser
+        except Exception as e:
+            print(f"   启动新浏览器失败: {e}")
+            return None
+
+
+async def navigate_to_exam_page(browser):
+    """导航到考试页面"""
+    print("2. 正在打开考试页面...")
+    try:
+        # 创建新标签页
+        tab = browser.latest_tab
+        # 访问考试页面
+        tab.get("https://www.zlbbda.com.cn/studysome/topicbank")
+        print("   考试页面打开成功")
+        return tab
+    except Exception as e:
+        print(f"   打开考试页面失败: {e}")
+        return None
+
+
+async def wait_for_page_load(tab, timeout=10):
+    """等待页面加载完成"""
+    print("3. 等待页面加载...")
+    try:
+        # 等待页面加载完成
+        await asyncio.sleep(timeout)
+        print("   页面加载完成")
+        return True
+    except Exception as e:
+        print(f"   等待页面加载时出错: {e}")
+        return False
+
+
+async def take_screenshot(tab, filename="online_exam.png"):
+    """截图考试页面"""
+    print("4. 正在截图考试页面...")
+    try:
+        # 截图整个页面
+        screenshot_path = Path(filename).resolve()
+        tab.get_screenshot(path=str(screenshot_path))
+        print(f"   考试页面截图保存成功: {screenshot_path}")
+        return str(screenshot_path)
+    except Exception as e:
+        print(f"   截图失败: {e}")
+        return None
+
+
+async def extract_text_content(tab):
+    """提取页面文字内容"""
+    print("5. 正在提取题目文字内容...")
+    try:
+        # 获取页面文本内容
+        text_content = tab.html
+        # 简化内容，只保留文本
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(text_content, 'html.parser')
+        # 移除script和style标签
+        for script in soup(["script", "style"]):
+            script.decompose()
+        # 获取纯文本
+        text = soup.get_text()
+        # 清理文本
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        text = ' '.join(chunk for chunk in chunks if chunk)
+        
+        print("   提取的题目内容:")
+        # 只显示前1000个字符
+        print(f"   {text[:1000]}...")
+        return text
+    except Exception as e:
+        print(f"   提取文字内容失败: {e}")
+        return None
+
+
+async def extract_question_and_options(tab):
+    """提取题目和选项"""
+    print("5. 正在提取题目和选项...")
+    try:
+        # 提取题目信息
+        question_info = {}
+        
+        # 查找题目文本（包含判断题的文本）
+        question_element = tab.ele('t:判断题')
+        if question_element:
+            # 获取题目文本
+            question_text = question_element.text
+            # 查找后面的题目内容
+            parent = question_element.parent()
+            if parent:
+                # 获取题目完整内容
+                full_text = parent.text
+                question_info['question'] = full_text
+                
+                # 查找选项 - 使用更灵活的方式
+                options = []
+                # 查找所有可能的选项元素
+                option_elements = tab.eles('t:*')
+                for element in option_elements:
+                    text = element.text.strip()
+                    # 检查是否为A选项（正确/正确答案等）
+                    if text.startswith('A') and ('正确' in text or '对' in text):
+                        options.append({'text': text, 'element': element})
+                    # 检查是否为B选项（错误/错误答案等）
+                    elif text.startswith('B') and ('错误' in text or '错' in text):
+                        options.append({'text': text, 'element': element})
+                    
+                question_info['options'] = options
+                
+                print(f"   题目: {full_text}")
+                print(f"   选项: {[opt['text'] for opt in options]}")
+        else:
+            # 如果没有找到判断题标识，尝试其他方式提取
+            page_text = tab.html
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(page_text, 'html.parser')
+            # 移除script和style标签
+            for script in soup(["script", "style"]):
+                script.decompose()
+            # 获取纯文本
+            text = soup.get_text()
+            question_info['question'] = text[:500]  # 取前500字符
+            
+        return question_info
+    except Exception as e:
+        print(f"   提取题目和选项失败: {e}")
+        return None
+
+
+def call_modelscope_api(question_text):
+    """调用魔搭ModelScope API解答问题"""
+    print("6. 正在使用AI解答问题...")
+    try:
+        # 配置ModelScope API
+        client = OpenAI(
+            api_key=os.getenv('MODELSCOPE_API_KEY', 'ms-0f3fca09-39fd-4b3b-84b8-74243108fe9e'),  # 使用您提供的API密钥
+            base_url="https://api-inference.modelscope.cn/v1"
+        )
+        
+        # 构造提示词，只要求返回答案
+        prompt = f"""
+        你是一位专业的考试辅导老师，请仔细阅读以下考试题目，并给出正确的答案选项。
+        
+        考试题目内容：
+        {question_text}
+        
+        请直接回答正确的选项，只需返回"A"或"B"，不需要任何解释或其他内容。
+        """
+        
+        # 调用模型
+        completion = client.chat.completions.create(
+            model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
+            messages=[{"role": "user", "content": prompt}],
+            stream=False
+        )
+        
+        # 获取回答
+        answer = completion.choices[0].message.content.strip()
+        print(f"\nAI回答: {answer}")
+        return answer, ""  # 返回答案和空的解析
+    except Exception as e:
+        print(f"   AI解答失败: {e}")
+        # 不提供默认答案，返回None表示解答失败
+        print(f"\nAI解答失败，不提供默认答案")
+        return None, ""
+
+
+def save_results(screenshot_path, extracted_text, model_answer):
+    """保存结果到文件"""
+    print("7. 正在保存结果到文件...")
+    try:
+        # 保存题目内容
+        with open("online_exam_content.txt", "w", encoding="utf-8") as f:
+            f.write("考试题目内容:\n")
+            f.write("=" * 50 + "\n")
+            f.write(extracted_text if extracted_text else "未能提取到题目内容")
+        
+        # 保存AI答案
+        with open("online_exam_answers.txt", "w", encoding="utf-8") as f:
+            f.write("考试题目:\n")
+            f.write("=" * 50 + "\n")
+            f.write(extracted_text if extracted_text else "未能提取到题目内容")
+            f.write("\n\nAI答案:\n")
+            f.write("=" * 50 + "\n")
+            f.write(model_answer if model_answer else "未能获得AI答案")
+        
+        print("   结果已保存到:")
+        print("   - online_exam_content.txt (题目内容)")
+        print("   - online_exam_answers.txt (题目和答案)")
+        if screenshot_path:
+            print(f"   - {os.path.basename(screenshot_path)} (考试页面截图)")
+    except Exception as e:
+        print(f"   保存结果失败: {e}")
+
+
+
+
+
+async def auto_solve_exam(browser, tab):
+    """自动解答考试题目"""
+    print("6. 开始自动解答考试题目...")
+    
+    # 获取总题数
+    total_questions = 148  # 根据页面显示设置总题数
+    question_count = 0
+    
+    # 循环处理所有题目
+    while question_count < total_questions:
+        question_count += 1
+        print(f"\n正在处理第 {question_count} 题...")
+        
+        # 等待用户按回车键开始识别当前题目
+        if question_count > 1:
+            input("请手动选择答案并点击下一题，完成后按回车键开始识别第 {question_count} 题...")
+        else:
+            input("请按回车键开始识别第 {question_count} 题...")
+        
+        # 等待页面加载
+        await asyncio.sleep(3)
+        
+        # 提取题目和选项
+        question_info = await extract_question_and_options(tab)
+        if not question_info:
+            print("无法提取题目信息，跳过此题")
+            # 等待用户手动操作
+            input("请手动处理此题，完成后按回车键继续...")
+            continue
+        
+        # 调用AI解答问题
+        question_text = question_info.get('question', '')
+        print("正在调用AI解答问题...")
+        ai_answer, ai_explanation = call_modelscope_api(question_text)
+        if ai_answer:
+            print(f"AI答案: {ai_answer}")
+        else:
+            print("AI解答失败")
+        
+        # 保存结果并在终端输出题目和答案
+        print(f"\n{'='*50}")
+        print(f"第 {question_count} 题:")
+        print(f"{'='*50}")
+        print(f"题目: {question_text}")
+        if ai_answer:
+            print(f"答案: {ai_answer}")
+        if ai_explanation:
+            print(f"解析: {ai_explanation}")
+        print(f"{'='*50}\n")
+        
+        # 保存结果
+        save_single_result(question_count, question_text, ai_answer, ai_explanation)
+        
+        # 如果是最后一题，显示完成信息
+        if question_count >= total_questions:
+            print("所有题目已处理完成！")
+    
+    print(f"\n自动答题完成，共处理 {question_count} 道题目")
+
+
+def save_single_result(question_number, question_content, ai_answer, ai_explanation):
+    """保存单个题目的结果（仅输出到终端，不保存文件）"""
+    print(f"7. 第 {question_number} 题结果（仅显示在终端）:")
+    
+    try:
+        # 只在终端显示题目和答案，不保存到文件
+        print(f"{'='*50}")
+        print(f"第 {question_number} 题:")
+        print(f"{'='*50}")
+        print(f"题目: {question_content[:500]}")
+        if ai_answer:
+            print(f"答案: {ai_answer}")
+        if ai_explanation:
+            print(f"解析: {ai_explanation}")
+        print(f"{'='*50}\n")
+            
+        print(f"   第 {question_number} 题结果已显示在终端")
+    except Exception as e:
+        print(f"   处理第 {question_number} 题结果时出错: {e}")
+
+
+async def main():
+    """主函数"""
+    print("开始在线考试题目解答流程...")
+    
+    # 1. 连接到浏览器
+    browser = await connect_to_browser()
+    if not browser:
+        return
+    
+    try:
+        # 2. 导航到考试页面
+        tab = await navigate_to_exam_page(browser)
+        if not tab:
+            print("无法打开考试页面")
+            return
+        
+        # 3. 等待页面加载完成
+        await wait_for_page_load(tab, 5)
+        
+        # 4. 自动解答考试题目
+        await auto_solve_exam(browser, tab)
+        
+        print("\n答题完成")
+        
+    except Exception as e:
+        print(f"执行过程中发生错误: {e}")
+    finally:
+        # 5. 不再关闭浏览器连接，保持浏览器打开
+        print("浏览器连接保持打开状态")
+
+
+if __name__ == "__main__":
+    # 安装必要的依赖
+    try:
+        import DrissionPage
+        import openai
+        import bs4
+    except ImportError as e:
+        print("正在安装必要的依赖包...")
+        os.system("uv pip install DrissionPage openai beautifulsoup4")
+    
+    # 运行主程序
+    asyncio.run(main())
