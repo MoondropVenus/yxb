@@ -51,17 +51,15 @@ async def connect_to_browser():
 
 
 async def navigate_to_exam_page(browser):
-    """导航到考试页面"""
-    print("2. 正在打开考试页面...")
+    """导航到考试页面 - 使用当前已打开的页面"""
+    print("2. 使用当前已打开的答题页面...")
     try:
-        # 创建新标签页
+        # 获取当前活动的标签页（不重新打开页面）
         tab = browser.latest_tab
-        # 访问考试页面
-        tab.get("https://www.zlbbda.com.cn/studysome/topicbank")
-        print("   考试页面打开成功")
+        print("   使用当前页面成功")
         return tab
     except Exception as e:
-        print(f"   打开考试页面失败: {e}")
+        print(f"   使用当前页面失败: {e}")
         return None
 
 
@@ -127,47 +125,48 @@ async def extract_question_and_options(tab):
         # 提取题目信息
         question_info = {}
         
-        # 查找题目文本（包含判断题的文本）
-        question_element = tab.ele('t:判断题')
-        if question_element:
-            # 获取题目文本
-            question_text = question_element.text
-            # 查找后面的题目内容
-            parent = question_element.parent()
-            if parent:
-                # 获取题目完整内容
-                full_text = parent.text
-                question_info['question'] = full_text
-                
-                # 查找选项 - 使用更灵活的方式
-                options = []
-                # 查找所有可能的选项元素
-                option_elements = tab.eles('t:*')
-                for element in option_elements:
-                    text = element.text.strip()
-                    # 检查是否为A选项（正确/正确答案等）
-                    if text.startswith('A') and ('正确' in text or '对' in text):
-                        options.append({'text': text, 'element': element})
-                    # 检查是否为B选项（错误/错误答案等）
-                    elif text.startswith('B') and ('错误' in text or '错' in text):
-                        options.append({'text': text, 'element': element})
-                    
-                question_info['options'] = options
-                
-                print(f"   题目: {full_text}")
-                print(f"   选项: {[opt['text'] for opt in options]}")
-        else:
-            # 如果没有找到判断题标识，尝试其他方式提取
-            page_text = tab.html
-            from bs4 import BeautifulSoup
-            soup = BeautifulSoup(page_text, 'html.parser')
-            # 移除script和style标签
-            for script in soup(["script", "style"]):
-                script.decompose()
-            # 获取纯文本
-            text = soup.get_text()
-            question_info['question'] = text[:500]  # 取前500字符
-            
+        # 使用和test_current_page.py相同的完整页面提取方法
+        # 获取页面HTML
+        html_content = tab.html
+        
+        # 使用BeautifulSoup解析HTML
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(html_content, 'html.parser')
+        
+        # 移除script和style标签
+        for script in soup(["script", "style"]):
+            script.decompose()
+        
+        # 获取纯文本
+        text = soup.get_text()
+        
+        # 清理文本
+        lines = (line.strip() for line in text.splitlines())
+        chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+        clean_text = ' '.join(chunk for chunk in chunks if chunk)
+        
+        # 保存完整的题目内容
+        question_info['question'] = clean_text
+        
+        # 查找选项
+        options = []
+        # 查找所有可能的选项元素
+        option_elements = tab.eles('t:*')
+        for element in option_elements:
+            text = element.text.strip()
+            # 检查是否为A选项（正确/正确答案等）
+            if text.startswith('A') and ('正确' in text or '对' in text):
+                options.append({'text': text, 'element': element})
+            # 检查是否为B选项（错误/错误答案等）
+            elif text.startswith('B') and ('错误' in text or '错' in text):
+                options.append({'text': text, 'element': element})
+        
+        question_info['options'] = options
+        
+        print(f"   题目长度: {len(clean_text)} 字符")
+        print(f"   题目预览: {clean_text[:200]}...")
+        print(f"   选项: {[opt['text'] for opt in options]}")
+        
         return question_info
     except Exception as e:
         print(f"   提取题目和选项失败: {e}")
@@ -178,10 +177,10 @@ def call_modelscope_api(question_text):
     """调用魔搭ModelScope API解答问题"""
     print("6. 正在使用AI解答问题...")
     try:
-        # 配置ModelScope API
+        # 配置ModelScope API - 使用新的API密钥和模型
         client = OpenAI(
-            api_key=os.getenv('MODELSCOPE_API_KEY', 'ms-0f3fca09-39fd-4b3b-84b8-74243108fe9e'),  # 使用您提供的API密钥
-            base_url="https://api-inference.modelscope.cn/v1"
+            base_url='https://api-inference.modelscope.cn/v1',
+            api_key='ms-0f3fca09-39fd-4b3b-84b8-74243108fe9e',  # ModelScope Token
         )
         
         # 构造提示词，只要求返回答案
@@ -194,10 +193,19 @@ def call_modelscope_api(question_text):
         请直接回答正确的选项，只需返回"A"或"B"，不需要任何解释或其他内容。
         """
         
-        # 调用模型
+        # 调用模型 - 使用新的模型ID
         completion = client.chat.completions.create(
-            model="Qwen/Qwen3-Coder-30B-A3B-Instruct",
-            messages=[{"role": "user", "content": prompt}],
+            model='Qwen/Qwen3-Coder-480B-A35B-Instruct',  # ModelScope Model-Id
+            messages=[
+                {
+                    'role': 'system',
+                    'content': 'You are a helpful assistant.'
+                },
+                {
+                    'role': 'user',
+                    'content': prompt
+                }
+            ],
             stream=False
         )
         
