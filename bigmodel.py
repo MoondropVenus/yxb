@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-在线考试题目解答脚本
+在线考试题目解答脚本 - 智谱AI BigModel版本
 专门用于解答 https://www.zlbbda.com.cn/studysome/topicbank 上的题目
+使用智谱AI BigModel API
 """
 
 import asyncio
@@ -16,11 +17,11 @@ except ImportError:
     print("请先安装DrissionPage: pip install DrissionPage")
     exit(1)
 
-# 尝试导入openai，如果没有则提示安装
+# 尝试导入zai-sdk，如果没有则提示安装
 try:
-    from openai import OpenAI
+    from zai import ZhipuAiClient
 except ImportError:
-    print("请先安装openai: pip install openai")
+    print("请先安装zai-sdk: pip install zai-sdk")
     exit(1)
 
 
@@ -76,7 +77,7 @@ async def wait_for_page_load(tab, timeout=10):
         return False
 
 
-async def take_screenshot(tab, filename="online_exam.png"):
+async def take_screenshot(tab, filename="bigmodel_exam.png"):
     """截图考试页面"""
     print("4. 正在截图考试页面...")
     try:
@@ -173,50 +174,54 @@ async def extract_question_and_options(tab):
         return None
 
 
-def call_modelscope_api(question_text):
-    """调用魔搭ModelScope API解答问题"""
-    print("6. 正在使用AI解答问题...")
+def call_bigmodel_api(question_text):
+    """调用智谱AI BigModel API解答问题"""
+    print("6. 正在使用智谱AI解答问题...")
     try:
-        # 配置ModelScope API - 使用新的API密钥和模型
-        client = OpenAI(
-            base_url='https://api-inference.modelscope.cn/v1',
-            api_key='ms-0f3fca09-39fd-4b3b-84b8-74243108fe9e',  # ModelScope Token
-        )
+        # 配置智谱AI BigModel API
+        api_key = "58c16dcd18a243788f32cafa7928d64f.Cglq3ehd3s7agRBe"
+        client = ZhipuAiClient(api_key=api_key)
         
-        # 构造提示词，只要求返回答案
+        # 构造更严格的提示词，只要求返回答案
         prompt = f"""
-        你是一位专业的考试辅导老师，请仔细阅读以下考试题目，并给出正确的答案选项。
-        
-        考试题目内容：
+        题目：
         {question_text}
         
-        请直接回答正确的选项，只需返回"A"或"B"，不需要任何解释或其他内容。
+        请直接回答正确的答案和选项，不需要任何解释或其他内容。
         """
         
-        # 调用模型 - 使用新的模型ID
-        completion = client.chat.completions.create(
-            model='Qwen/Qwen3-Coder-480B-A35B-Instruct',  # ModelScope Model-Id
+        # 调用模型 - 使用智谱AI的GLM-4.6模型
+        response = client.chat.completions.create(
+            model="glm-4.6",
             messages=[
                 {
-                    'role': 'system',
-                    'content': 'You are a helpful assistant.'
+                    "role": "system",
+                    "content": "只返回答案和选项"
                 },
                 {
-                    'role': 'user',
-                    'content': prompt
+                    "role": "user",
+                    "content": prompt
                 }
             ],
-            stream=False
+            temperature=0.1,  # 降低温度以获得更确定的答案
+            max_tokens=5       # 限制输出长度
         )
         
         # 获取回答
-        answer = completion.choices[0].message.content.strip()
-        print(f"\nAI回答: {answer}")
+        answer = response.choices[0].message.content.strip()
+        print(f"\n智谱AI回答: {answer}")
+        
+        # 清理答案，只保留A或B
+        if 'A' in answer:
+            answer = 'A'
+        elif 'B' in answer:
+            answer = 'B'
+        
         return answer, ""  # 返回答案和空的解析
     except Exception as e:
-        print(f"   AI解答失败: {e}")
+        print(f"   智谱AI解答失败: {e}")
         # 不提供默认答案，返回None表示解答失败
-        print(f"\nAI解答失败，不提供默认答案")
+        print(f"\n智谱AI解答失败，不提供默认答案")
         return None, ""
 
 
@@ -225,30 +230,27 @@ def save_results(screenshot_path, extracted_text, model_answer):
     print("7. 正在保存结果到文件...")
     try:
         # 保存题目内容
-        with open("online_exam_content.txt", "w", encoding="utf-8") as f:
+        with open("bigmodel_exam_content.txt", "w", encoding="utf-8") as f:
             f.write("考试题目内容:\n")
             f.write("=" * 50 + "\n")
             f.write(extracted_text if extracted_text else "未能提取到题目内容")
         
         # 保存AI答案
-        with open("online_exam_answers.txt", "w", encoding="utf-8") as f:
+        with open("bigmodel_exam_answers.txt", "w", encoding="utf-8") as f:
             f.write("考试题目:\n")
             f.write("=" * 50 + "\n")
             f.write(extracted_text if extracted_text else "未能提取到题目内容")
-            f.write("\n\nAI答案:\n")
+            f.write("\n\n智谱AI答案:\n")
             f.write("=" * 50 + "\n")
-            f.write(model_answer if model_answer else "未能获得AI答案")
+            f.write(model_answer if model_answer else "未能获得智谱AI答案")
         
         print("   结果已保存到:")
-        print("   - online_exam_content.txt (题目内容)")
-        print("   - online_exam_answers.txt (题目和答案)")
+        print("   - bigmodel_exam_content.txt (题目内容)")
+        print("   - bigmodel_exam_answers.txt (题目和答案)")
         if screenshot_path:
             print(f"   - {os.path.basename(screenshot_path)} (考试页面截图)")
     except Exception as e:
         print(f"   保存结果失败: {e}")
-
-
-
 
 
 async def auto_solve_exam(browser, tab):
@@ -266,9 +268,9 @@ async def auto_solve_exam(browser, tab):
         
         # 等待用户按回车键开始识别当前题目
         if question_count > 1:
-            input("请手动选择答案并点击下一题，完成后按回车键开始识别第 {question_count} 题...")
+            input(f"请手动选择答案并点击下一题，完成后按回车键开始识别第 {question_count} 题...")
         else:
-            input("请按回车键开始识别第 {question_count} 题...")
+            input(f"请按回车键开始识别第 {question_count} 题...")
         
         # 等待页面加载
         await asyncio.sleep(3)
@@ -281,14 +283,14 @@ async def auto_solve_exam(browser, tab):
             input("请手动处理此题，完成后按回车键继续...")
             continue
         
-        # 调用AI解答问题
+        # 调用智谱AI解答问题
         question_text = question_info.get('question', '')
-        print("正在调用AI解答问题...")
-        ai_answer, ai_explanation = call_modelscope_api(question_text)
+        print("正在调用智谱AI解答问题...")
+        ai_answer, ai_explanation = call_bigmodel_api(question_text)
         if ai_answer:
-            print(f"AI答案: {ai_answer}")
+            print(f"智谱AI答案: {ai_answer}")
         else:
-            print("AI解答失败")
+            print("智谱AI解答失败")
         
         # 保存结果并在终端输出题目和答案
         print(f"\n{'='*50}")
@@ -334,7 +336,7 @@ def save_single_result(question_number, question_content, ai_answer, ai_explanat
 
 async def main():
     """主函数"""
-    print("开始在线考试题目解答流程...")
+    print("开始在线考试题目解答流程（智谱AI BigModel版本）...")
     
     # 1. 连接到浏览器
     browser = await connect_to_browser()
@@ -351,15 +353,25 @@ async def main():
         # 3. 等待页面加载完成
         await wait_for_page_load(tab, 5)
         
-        # 4. 自动解答考试题目
+        # 4. 截图考试页面
+        screenshot_path = await take_screenshot(tab)
+        
+        # 5. 提取页面文字内容
+        extracted_text = await extract_text_content(tab)
+        
+        # 6. 自动解答考试题目
         await auto_solve_exam(browser, tab)
+        
+        # 7. 保存最终结果
+        if extracted_text:
+            save_results(screenshot_path, extracted_text, "智谱AI答案已显示在终端")
         
         print("\n答题完成")
         
     except Exception as e:
         print(f"执行过程中发生错误: {e}")
     finally:
-        # 5. 不再关闭浏览器连接，保持浏览器打开
+        # 8. 不再关闭浏览器连接，保持浏览器打开
         print("浏览器连接保持打开状态")
 
 
@@ -367,11 +379,11 @@ if __name__ == "__main__":
     # 安装必要的依赖
     try:
         import DrissionPage
-        import openai
+        from zai import ZhipuAiClient
         import bs4
     except ImportError as e:
         print("正在安装必要的依赖包...")
-        os.system("uv pip install DrissionPage openai beautifulsoup4")
+        os.system("uv pip install DrissionPage zai-sdk beautifulsoup4")
     
     # 运行主程序
     asyncio.run(main())
