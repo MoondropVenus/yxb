@@ -182,49 +182,64 @@ def call_bigmodel_api(question_text):
         api_key = "58c16dcd18a243788f32cafa7928d64f.Cglq3ehd3s7agRBe"
         client = ZhipuAiClient(api_key=api_key)
         
-        # 构造更严格的提示词，只要求返回答案
+        # 构造提示词 - 使用更简洁的格式
         prompt = f"""
-        题目：
-        {question_text}
-        
-        有单选题也有多选题，请看题号处的括号内是什么题型。直接回答正确的答案和选项，不需要任何解释或其他内容。
+题目：{question_text}
+答案：
         """
         
-        # 调用模型 - 使用智谱AI的GLM-4.6模型
+        # 调用智谱AI API - 尝试使用不同的模型或参数
         response = client.chat.completions.create(
             model="glm-4.6",
             messages=[
                 {
                     "role": "system",
-                    "content": "只返回答案和选项"
+                    "content": "你是一个选择题答题助手。用户提供选择题，你只需要返回正确的选项字母（A、B、C或D）。"
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            temperature=0.1,  # 降低温度以获得更确定的答案
-            max_tokens=100     # 增加输出长度，避免答案被截断
+            temperature=0.1,
+            max_tokens=100  # 增加token数量，让模型有更多空间返回答案
         )
         
-        # 获取回答 - 优先使用reasoning_content，如果没有则使用content
+        # 获取回答 - 优先使用content字段，因为reasoning_content包含推理过程
         message = response.choices[0].message
         
-        # 优先使用reasoning_content，如果没有则使用content
-        if hasattr(message, 'reasoning_content') and message.reasoning_content:
+        # 优先使用content字段，因为它应该包含直接答案
+        if message.content and message.content.strip():
+            answer = message.content.strip()
+            print(f"\n智谱AI content字段回答: {answer}")
+        # 如果content为空，再尝试使用reasoning_content
+        elif hasattr(message, 'reasoning_content') and message.reasoning_content:
             answer = message.reasoning_content.strip()
+            print(f"\n智谱AI reasoning_content字段回答: {answer}")
         else:
-            answer = message.content.strip() if message.content else ""
+            answer = ""
+            print(f"\n智谱AI回答为空")
         
-        print(f"\n智谱AI回答: {answer}")
-        
-        # 清理答案，只保留A或B
-        if 'A' in answer:
-            answer = 'A'
+        # 改进答案提取逻辑
+        # 1. 首先检查是否直接返回了单个字母（A、B、C、D）
+        if len(answer.strip()) == 1 and answer.strip() in ['A', 'B', 'C', 'D']:
+            clean_answer = answer.strip()
+        # 2. 检查答案中是否包含选项字母
+        elif 'A' in answer:
+            clean_answer = 'A'
         elif 'B' in answer:
-            answer = 'B'
+            clean_answer = 'B'
+        elif 'C' in answer:
+            clean_answer = 'C'
+        elif 'D' in answer:
+            clean_answer = 'D'
+        else:
+            # 如果无法提取选项，返回原始答案的前20个字符
+            clean_answer = answer[:20] if answer else "无法提取答案"
         
-        return answer, ""  # 返回答案和空的解析
+        print(f"清理后的答案: {clean_answer}")
+        
+        return clean_answer, ""  # 返回答案和空的解析
     except Exception as e:
         print(f"   智谱AI解答失败: {e}")
         # 不提供默认答案，返回None表示解答失败

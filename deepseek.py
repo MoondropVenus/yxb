@@ -189,7 +189,7 @@ def call_deepseek_api(question_text):
        题目：
         {question_text}
         
-        请直接回答正确的答案和选项，，不需要任何解释或其他内容。
+        有单选题也有多选题，请看题号处的括号内是什么题型。直接回答正确的答案和选项，不需要任何解释或其他内容。
         """
         
         # 调用模型 - 使用DeepSeek模型
@@ -198,7 +198,7 @@ def call_deepseek_api(question_text):
             messages=[
                 {
                     'role': 'system',
-                    'content': '你是一个专业的考试助手，只返回答案选项'
+                    'content': '只返回答案和选项'
                 },
                 {
                     'role': 'user',
