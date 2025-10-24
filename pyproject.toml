@@ -8,6 +8,7 @@ dependencies = [
     "drissionpage>=4.1.0.18",
     "fastmcp>=2.4.0",
     "openai>=1.0.0",
+    "zai-sdk>=0.0.4",
 ]
 
 
