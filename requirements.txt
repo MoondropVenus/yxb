@@ -1,3 +1,4 @@
 drissionpage>=4.1.0.18
 fastmcp>=2.4.0
 uv>=0.1.0
+openai>=1.0.0
