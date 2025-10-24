@@ -204,11 +204,18 @@ def call_bigmodel_api(question_text):
                 }
             ],
             temperature=0.1,  # 降低温度以获得更确定的答案
-            max_tokens=5       # 限制输出长度
+            max_tokens=100     # 增加输出长度，避免答案被截断
         )
         
-        # 获取回答
-        answer = response.choices[0].message.content.strip()
+        # 获取回答 - 优先使用reasoning_content，如果没有则使用content
+        message = response.choices[0].message
+        
+        # 优先使用reasoning_content，如果没有则使用content
+        if hasattr(message, 'reasoning_content') and message.reasoning_content:
+            answer = message.reasoning_content.strip()
+        else:
+            answer = message.content.strip() if message.content else ""
+        
         print(f"\n智谱AI回答: {answer}")
         
         # 清理答案，只保留A或B
